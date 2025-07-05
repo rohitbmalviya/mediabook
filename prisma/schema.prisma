@@ -1,0 +1,162 @@
+// ============================================================
+// MediBook — Prisma Schema
+// Provider: SQLite (local dev). Swap to postgresql for prod.
+// Generator output: src/generated/prisma (Prisma 7 explicit path)
+// Connection URL is in prisma.config.ts, NOT here (Prisma 7 change).
+// ============================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+// SQLite stores enums as strings; Prisma handles the mapping transparently.
+
+enum Role {
+  PATIENT
+  DOCTOR
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+}
+
+// ─── User ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role     @default(PATIENT)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  doctorProfile         DoctorProfile?
+  appointmentsAsPatient Appointment[]  @relation("PatientAppointments")
+  appointmentsAsDoctor  Appointment[]  @relation("DoctorAppointments")
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+// ─── DoctorProfile ────────────────────────────────────────────────────────────
+
+model DoctorProfile {
+  id                      String  @id @default(cuid())
+  userId                  String  @unique
+  specialty               String
+  bio                     String
+  consultationFee         Int     // stored in paise (minor units); divide by 100 for display
+  city                    String
+  photoUrl                String
+  ratingAvg               Float   @default(0.0)
+  experienceYears         Int     @default(0)
+  isAcceptingAppointments Boolean @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  // Relations
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  availabilitySlots AvailabilitySlot[]
+
+  @@index([specialty])
+  @@index([city])
+  @@index([specialty, city])
+  @@index([ratingAvg])
+  @@map("doctor_profiles")
+}
+
+// ─── AvailabilitySlot ─────────────────────────────────────────────────────────
+// Weekly recurring pattern. dayOfWeek: 0=Sunday … 6=Saturday.
+// startTime / endTime are "HH:MM" strings (timezone-naive, local clinic time).
+// The booking engine derives concrete bookable slots from these minus existing
+// PENDING|CONFIRMED appointments for the relevant doctor/day.
+
+model AvailabilitySlot {
+  id           String @id @default(cuid())
+  doctorId     String
+  dayOfWeek    Int    // 0–6
+  startTime    String // "HH:MM"
+  endTime      String // "HH:MM"
+  slotDuration Int    @default(30) // minutes per bookable slot
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  doctor DoctorProfile @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, dayOfWeek, startTime])
+  @@index([doctorId])
+  @@index([doctorId, dayOfWeek])
+  @@map("availability_slots")
+}
+
+// ─── Appointment ──────────────────────────────────────────────────────────────
+
+model Appointment {
+  id        String            @id @default(cuid())
+  patientId String
+  doctorId  String
+  startsAt  DateTime
+  endsAt    DateTime
+  status    AppointmentStatus @default(PENDING)
+  reason    String?
+  notes     String?           // doctor's internal notes
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  // Relations
+  patient User     @relation("PatientAppointments", fields: [patientId], references: [id], onDelete: Restrict)
+  doctor  User     @relation("DoctorAppointments",  fields: [doctorId],  references: [id], onDelete: Restrict)
+  payment Payment?
+
+  // Prevent double-booking: same doctor cannot have two appointments at the same start time
+  @@unique([doctorId, startsAt])
+
+  // Query indexes
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([patientId, status])
+  @@index([doctorId, status])
+  @@index([startsAt])
+  @@index([doctorId, startsAt])
+  @@map("appointments")
+}
+
+// ─── Payment ──────────────────────────────────────────────────────────────────
+
+model Payment {
+  id            String        @id @default(cuid())
+  appointmentId String        @unique // 1-1 with Appointment
+  amount        Int           // paise; mirrors appointment doctor's consultationFee at time of booking
+  status        PaymentStatus @default(PENDING)
+  provider      String        @default("mock")
+  transactionId String?       // mock or real gateway reference
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // Relations
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId])
+  @@index([status])
+  @@map("payments")
+}
