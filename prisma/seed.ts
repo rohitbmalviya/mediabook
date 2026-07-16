@@ -11,25 +11,14 @@
  */
 
 import 'dotenv/config'
-import path from 'node:path'
-import { PrismaLibSql } from '@prisma/adapter-libsql'
+import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../src/generated/prisma/client'
 import type { AppointmentStatus, PaymentStatus } from '../src/generated/prisma/enums'
 import bcrypt from 'bcryptjs'
 
 // ─── Prisma 7: instantiate with libSQL adapter ────────────────────────────────
 // PrismaLibSql takes a libsql Config object directly (not a pre-created client).
-function buildLibSQLUrl(): string {
-  const raw = process.env.DATABASE_URL ?? 'file:./prisma/dev.db'
-  if (!raw.startsWith('file:')) return raw
-  const filePart = raw.slice('file:'.length)
-  const absPath = path.isAbsolute(filePart)
-    ? filePart
-    : path.resolve(process.cwd(), filePart)
-  return `file:${absPath}`
-}
-
-const adapter = new PrismaLibSql({ url: buildLibSQLUrl() })
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL })
 const prisma = new PrismaClient({ adapter })
 
 // ─── Demo Credentials ────────────────────────────────────────────────────────
